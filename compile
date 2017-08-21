@@ -1,0 +1,2 @@
+#!/bin/bash
+closure-compiler --js='postal.js' --js='addressMetadata.js' --js_output_file='postal.min.js'
