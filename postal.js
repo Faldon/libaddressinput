@@ -254,12 +254,24 @@ var Postal = (function() {
   ];
 
   /** @constructor */
-  function Postal() {
-
+  function Postal(useOnlineData) {
+    this.AddressComponents = new Postal.AddressComponents();
+    if(typeof useOnlineData !== 'undefined') {
+      this.UseOnlineData = useOnlineData;
+    }
+    if(!this.UseOnlineData) {
+      this.AddressMetadata = Postal.AddressMetadata || {};
+    }
   }
 
-  /** @type {!string} */
+  /** @type {!boolean} */
   Postal.prototype.UseOnlineData = true;
+
+  /** @type {!string} */
+  Postal.prototype.rawAddress = null;
+
+  /** @type {!string} */
+  Postal.prototype.tempAddressForDebug = null;
 
   /** @type {!Object} */
   Postal.prototype.AddressMetadata = {
@@ -267,6 +279,7 @@ var Postal = (function() {
   };
 
   Postal.prototype.parseAddress = function(address, countryCode) {
+    this.rawAddress = address;
     if (countryCodes.indexOf(countryCode.toUpperCase()) > -1) {
       // if(this.UseOnlineData) {
       //   var req = new XMLHttpRequest();
@@ -274,9 +287,22 @@ var Postal = (function() {
       //   req.send();
       //   console.dir(req.responseText);
       // }
-      var country_meta = this.AddressMetadata[countryCode];
+      var country_meta = Postal.AddressMetadata[countryCode];
+
+      var fmt = 'fmt';
+      if(country_meta.hasOwnProperty('lfmt')) {
+        fmt = 'lfmt';
+      }
+      var addr_fmt = country_meta[fmt];
       this.AddressComponents.CountryCode = country_meta.key;
       this.AddressComponents.Country = country_meta.name;
+
+      address = address.toUpperCase()
+      .replace(country_meta.name, "");
+      address = address.toUpperCase()
+      .replace(new RegExp(" "+country_meta.key+"( |$)"), "");
+
+      /* Finding Postcode */
       var zip_candidate = address.match(new RegExp(country_meta.zip, "g"));
       if(zip_candidate !== null) {
         switch(zip_candidate.length) {
@@ -284,48 +310,102 @@ var Postal = (function() {
             break;
           case 1:
             this.AddressComponents.Postcode = zip_candidate[0];
+            address = address.replace(zip_candidate[0].toUpperCase(), "");
             break;
           default:
-            if(country_meta.hasOwnProperty('sub_keys')) {
-              address = address.toUpperCase()
-                .replace(country_meta.name, "");
-              address = address.toLocaleUpperCase()
-                  .replace(new RegExp(" "+country_meta.key+"( |$)"), "");
-              var fmt = 'fmt';
-              if(country_meta.hasOwnProperty('lfmt')) {
-                fmt = 'lfmt';
+            if(addr_fmt.startsWith("%Z")) {
+              for(var i=0;i<zip_candidate.length;i++) {
+                if(address.startsWith(zip_candidate[i].toUpperCase())) {
+                  this.AddressComponents.Postcode = zip_candidate[i];
+                  address = address.replace(zip_candidate[i].toUpperCase(), "");
+                  break;
+                }
               }
-              var addr_fmt = country_meta[fmt];
-              if(addr_fmt.startsWith("%Z")) {
-                for(var i=0;i<zip_candidate.length;i++) {
-                  if(address.startsWith(zip_candidate[i])) {
-                    this.AddressComponents.Postcode = zip_candidate[i];
-                    break;
-                  }
-                }
-              } else if(addr_fmt.endsWith("%Z")) {
-                for(i=0;i<zip_candidate.length;i++) {
-                  if(address.endsWith(zip_candidate[i])) {
-                    this.AddressComponents.Postcode = zip_candidate[i];
-                    break;
-                  }
-                }
-              } else {
-                var addr_fmt_comp = addr_fmt.match(new RegExp("(.*)(%Z)(.*)"));
-                var s = addr_fmt_comp[1].replace(new RegExp("\\S+", "g"), '.*');
-                var e = addr_fmt_comp[3].replace(new RegExp("\\S+", "g"), '.*');
-                for(i=0;i<zip_candidate.length;i++) {
-                  if(address.match(new RegExp(s+zip_candidate[i]+e))) {
-                    this.AddressComponents.Postcode = zip_candidate[i];
-                    break;
-                  }
+            } else if(addr_fmt.endsWith("%Z")) {
+              for(i=0;i<zip_candidate.length;i++) {
+                if(address.endsWith(zip_candidate[i].toUpperCase())) {
+                  this.AddressComponents.Postcode = zip_candidate[i];
+                  address = address.replace(zip_candidate[i].toUpperCase(), "");
+                  break;
                 }
               }
             } else {
-              break;
+              var addr_fmt_comp = addr_fmt.match(new RegExp("(.*)(%Z)(.*)"));
+              var s = addr_fmt_comp[1].replace(new RegExp("\\S+", "g"), '.*');
+              var e = addr_fmt_comp[3].replace(new RegExp("\\S+", "g"), '.*');
+              for(i=0;i<zip_candidate.length;i++) {
+                if(address.match(new RegExp(s+zip_candidate[i].toUpperCase()+e))) {
+                  this.AddressComponents.Postcode = zip_candidate[i];
+                  address = address.replace(zip_candidate[i].toUpperCase(), "");
+                  break;
+                }
+              }
             }
         }
       }
+      addr_fmt = addr_fmt.replace("%Z", "");
+
+      /* Checking for administrative area */
+      addr_fmt_comp = addr_fmt.match(new RegExp("(.*)(%S)(.*)"));
+      if(addr_fmt_comp !== null) {
+        var sub_names = 'sub_names';
+        if(country_meta.hasOwnProperty('sub_lnames')) {
+          sub_names = 'sub_lnames';
+        }
+        var sub_localities = country_meta[sub_names].split("~");
+        s = addr_fmt_comp[1].replace(new RegExp("\\S+", "g"), '.*');
+        e = addr_fmt_comp[3].replace(new RegExp("\\S+", "g"), '.*');
+        for(i=0;i<sub_localities.length;i++) {
+          if(address.match(new RegExp(s+sub_localities[i].toUpperCase()+e))) {
+            this.AddressComponents.AdminArea = sub_localities[i];
+            address = address.replace(sub_localities[i].toUpperCase(), "");
+            addr_fmt = addr_fmt.replace("%S", "");
+            break;
+          }
+        }
+        if(addr_fmt.match(new RegExp("(.*)(%S)(.*)")) !== null) {
+          if(
+              address.match(
+                  new RegExp(country_meta.state_name_type.toUpperCase())
+              )
+          ) {
+            sub_localities = country_meta.sub_keys.split("~");
+            for(i=0;i<sub_localities.length;i++) {
+              if(this.AddressComponents.Postcode.match(
+                  new RegExp("^"+country_meta[sub_localities[i]].zip, "i")
+                  )
+              ) {
+                console.dir(country_meta[sub_localities[i]]);
+                var area_name = 'key';
+                if(country_meta[sub_localities[i]].hasOwnProperty('lname')) {
+                  area_name = 'lname';
+                }
+                this.AddressComponents.AdminArea = country_meta[sub_localities[i]][area_name];
+                if(country_meta.hasOwnProperty('state_name_type')) {
+                  address = address.replace(
+                      country_meta.state_name_type.toUpperCase(), "");
+                }
+                break;
+              }
+            }
+          }
+        }
+      }
+      addr_fmt = addr_fmt.replace("%S", "");
+      console.log(addr_fmt);
+
+      /* Checking for locality (mostly city, town or village */
+      addr_fmt_comp = addr_fmt.match(new RegExp("(.*)(%C)(.*)"));
+      if(addr_fmt_comp !== null) {
+        s = addr_fmt_comp[1].replace(new RegExp("\\S+", "g"), '.*');
+        e = addr_fmt_comp[3].replace(new RegExp("\\S+", "g"), '.*');
+        var addr_comp = address.match(new RegExp(s+"(.*)"+e));
+        if(addr_comp !== null) {
+          this.AddressComponents.Locality = addr_comp[1];
+          address = address.replace(addr_comp[1], "");
+        }
+      }
+      this.tempAddressForDebug = address;
     }
     return this;
   };
@@ -335,10 +415,6 @@ var Postal = (function() {
       this.AddressComponents.valid = false;
     }
     return this;
-  };
-
-  Postal.prototype.getAddressComponents = function() {
-    return this.AddressComponents;
   };
 
   Postal.prototype.downloadMetadata = function(deep) {
@@ -390,27 +466,31 @@ var Postal = (function() {
     return this;
   };
 
-  return new Postal();
+  Postal.prototype.printRawAddress = function() {
+    console.log(this.rawAddress);
+    return this;
+  };
+
+  return Postal;
 })();
 Postal.AddressComponents = (function() {
   'use strict';
 
   /** @constructor */
-  function AddressComponents() {
-
-  }
+  function AddressComponents() {}
 
   /** @type {!string} */
   AddressComponents.prototype.CountryCode = null;
   /** @type {!string} */
   AddressComponents.prototype.Country = null;
   /** @type {!string} */
-  AddressComponents.prototype.City = null;
+  AddressComponents.prototype.AdminArea = null;
+  /** @type {!string} */
+  AddressComponents.prototype.Locality = null;
   /** @type {!string} */
   AddressComponents.prototype.Postcode = null;
   /** @type {!string} */
   AddressComponents.prototype.Route = null;
 
-  return new AddressComponents();
-
+  return AddressComponents;
 })();
