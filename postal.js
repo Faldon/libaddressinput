@@ -375,43 +375,59 @@ var Postal = (function() {
       }
       addr_fmt = addr_fmt.replace("%S", "");
       address = address.trim();
-      while(address.match(new RegExp('[a-z]$', 'i')) === null) {
+      while(address.match(new RegExp('[a-z0-9]$', 'i')) === null) {
         address = address.substring(0, address.length-1);
       }
 
       /* Checking for locality (mostly city, town or village */
-      addr_fmt_comp = addr_fmt.match(new RegExp("(.*)(%C)(.*)"));
-      if(addr_fmt_comp !== null) {
-        s = addr_fmt_comp[1].replace(new RegExp("\\S+", "g"), '.*');
-        e = addr_fmt_comp[3].replace(new RegExp("\\S+", "g"), '.*');
-        var addr_comp = address.match(new RegExp(s+"(.*)"+e));
-        if(addr_comp !== null && addr_comp[1] !== "") {
-          this.AddressComponents.Locality = addr_comp[1];
-          address = address.replace(addr_comp[1], "");
+      if(address.lastIndexOf(",")>-1) {
+        switch(country_meta.require.indexOf("C") > country_meta.require.indexOf("A")) {
+          case true:
+            this.AddressComponents.Locality = address.substr(
+                address.lastIndexOf(",")+1
+            ).trim();
+            address = address.substr(0, address.lastIndexOf(","));
+            break;
+          case false:
+            this.AddressComponents.Locality = address.substr(
+                0, address.lastIndexOf(",")
+            ).trim();
+            address = address.substr(address.lastIndexOf(",")+1);
         }
-      }
-      if(this.AddressComponents.Locality === null) {
-        if(!addr_fmt.endsWith("%C")) {
-          var requirements = {};
-          for(i=0;i<country_meta.require.length;i++) {
-            var req = country_meta.require.substring(i, i+1);
-            requirements[req] = addr_fmt.indexOf(req);
+      } else {
+        addr_fmt_comp = addr_fmt.match(new RegExp("(.*)(%C)(.*)"));
+        if(addr_fmt_comp !== null) {
+          s = addr_fmt_comp[1].replace(new RegExp("\\S+", "g"), '.*');
+          e = addr_fmt_comp[3].replace(new RegExp("\\S+", "g"), '.*');
+          var addr_comp = address.match(new RegExp(s+"(.*)"+e));
+          if(addr_comp !== null && addr_comp[1] !== "") {
+            this.AddressComponents.Locality = addr_comp[1];
+            address = address.replace(addr_comp[1], "");
           }
-          if(
-              requirements.hasOwnProperty("C") &&
-              Math.max.apply(Math, Object.values(requirements))===requirements["C"]
-          ) {
+        }
+        if(this.AddressComponents.Locality === null) {
+          if(!addr_fmt.endsWith("%C")) {
+            var requirements = {};
+            for(i=0;i<country_meta.require.length;i++) {
+              var req = country_meta.require.substring(i, i+1);
+              requirements[req] = addr_fmt.indexOf(req);
+            }
+            if(
+                requirements.hasOwnProperty("C") &&
+                Math.max.apply(Math, Object.values(requirements))===requirements["C"]
+            ) {
 
-            addr_fmt = addr_fmt.substr(0,requirements["C"]+1);
-            addr_fmt_comp = addr_fmt.match(new RegExp("(.*)(%C)(.*)"));
+              addr_fmt = addr_fmt.substr(0,requirements["C"]+1);
+              addr_fmt_comp = addr_fmt.match(new RegExp("(.*)(%C)(.*)"));
 
-            if(addr_fmt_comp !== null) {
-              s = addr_fmt_comp[1].replace(new RegExp("\\S+", "g"), '.*');
-              e = addr_fmt_comp[3].replace(new RegExp("\\S+", "g"), '.*');
-              addr_comp = address.match(new RegExp(s+"(.*)"+e));
-              if(addr_comp !== null && addr_comp[1] !== "") {
-                this.AddressComponents.Locality = addr_comp[1];
-                address = address.replace(addr_comp[1], "");
+              if(addr_fmt_comp !== null) {
+                s = addr_fmt_comp[1].replace(new RegExp("\\S+", "g"), '.*');
+                e = addr_fmt_comp[3].replace(new RegExp("\\S+", "g"), '.*');
+                addr_comp = address.match(new RegExp(s+"(.*)"+e));
+                if(addr_comp !== null && addr_comp[1] !== "") {
+                  this.AddressComponents.Locality = addr_comp[1];
+                  address = address.replace(addr_comp[1], "");
+                }
               }
             }
           }
