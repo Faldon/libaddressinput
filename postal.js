@@ -313,37 +313,20 @@ var Postal = (function() {
             address = address.replace(zip_candidate[0].toUpperCase(), "");
             break;
           default:
-            if(addr_fmt.startsWith("%Z")) {
-              for(var i=0;i<zip_candidate.length;i++) {
-                if(address.startsWith(zip_candidate[i].toUpperCase())) {
-                  this.AddressComponents.Postcode = zip_candidate[i];
-                  address = address.replace(zip_candidate[i].toUpperCase(), "");
-                  break;
-                }
-              }
-            } else if(addr_fmt.endsWith("%Z")) {
-              for(i=0;i<zip_candidate.length;i++) {
-                if(address.endsWith(zip_candidate[i].toUpperCase())) {
-                  this.AddressComponents.Postcode = zip_candidate[i];
-                  address = address.replace(zip_candidate[i].toUpperCase(), "");
-                  break;
-                }
-              }
-            } else {
-              var addr_fmt_comp = addr_fmt.match(new RegExp("(.*)(%Z)(.*)"));
-              var s = addr_fmt_comp[1].replace(new RegExp("\\S+", "g"), '.*');
-              var e = addr_fmt_comp[3].replace(new RegExp("\\S+", "g"), '.*');
-              for(i=0;i<zip_candidate.length;i++) {
-                if(address.match(new RegExp(s+zip_candidate[i].toUpperCase()+e))) {
-                  this.AddressComponents.Postcode = zip_candidate[i];
-                  address = address.replace(zip_candidate[i].toUpperCase(), "");
-                  break;
-                }
+            var addr_fmt_comp = addr_fmt.match(new RegExp("(.*)(%Z)(.*)"));
+            var s = addr_fmt_comp[1].replace(new RegExp("\\S+", "g"), '.*');
+            var e = addr_fmt_comp[3].replace(new RegExp("\\S+", "g"), '.*');
+            for(var i=0;i<zip_candidate.length;i++) {
+              if(address.match(new RegExp(s+zip_candidate[i].toUpperCase()+e))) {
+                this.AddressComponents.Postcode = zip_candidate[i];
+                address = address.replace(zip_candidate[i].toUpperCase(), "");
+                break;
               }
             }
         }
       }
       addr_fmt = addr_fmt.replace("%Z", "");
+      address = address.trim();
 
       /* Checking for administrative area */
       addr_fmt_comp = addr_fmt.match(new RegExp("(.*)(%S)(.*)"));
@@ -375,7 +358,6 @@ var Postal = (function() {
                   new RegExp("^"+country_meta[sub_localities[i]].zip, "i")
                   )
               ) {
-                console.dir(country_meta[sub_localities[i]]);
                 var area_name = 'key';
                 if(country_meta[sub_localities[i]].hasOwnProperty('lname')) {
                   area_name = 'lname';
@@ -392,7 +374,10 @@ var Postal = (function() {
         }
       }
       addr_fmt = addr_fmt.replace("%S", "");
-      console.log(addr_fmt);
+      address = address.trim();
+      while(address.match(new RegExp('[a-z]$', 'i')) === null) {
+        address = address.substring(0, address.length-1);
+      }
 
       /* Checking for locality (mostly city, town or village */
       addr_fmt_comp = addr_fmt.match(new RegExp("(.*)(%C)(.*)"));
@@ -400,12 +385,44 @@ var Postal = (function() {
         s = addr_fmt_comp[1].replace(new RegExp("\\S+", "g"), '.*');
         e = addr_fmt_comp[3].replace(new RegExp("\\S+", "g"), '.*');
         var addr_comp = address.match(new RegExp(s+"(.*)"+e));
-        if(addr_comp !== null) {
+        if(addr_comp !== null && addr_comp[1] !== "") {
           this.AddressComponents.Locality = addr_comp[1];
           address = address.replace(addr_comp[1], "");
         }
       }
-      this.tempAddressForDebug = address;
+      if(this.AddressComponents.Locality === null) {
+        if(!addr_fmt.endsWith("%C")) {
+          var requirements = {};
+          for(i=0;i<country_meta.require.length;i++) {
+            var req = country_meta.require.substring(i, i+1);
+            requirements[req] = addr_fmt.indexOf(req);
+          }
+          if(
+              requirements.hasOwnProperty("C") &&
+              Math.max.apply(Math, Object.values(requirements))===requirements["C"]
+          ) {
+
+            addr_fmt = addr_fmt.substr(0,requirements["C"]+1);
+            addr_fmt_comp = addr_fmt.match(new RegExp("(.*)(%C)(.*)"));
+
+            if(addr_fmt_comp !== null) {
+              s = addr_fmt_comp[1].replace(new RegExp("\\S+", "g"), '.*');
+              e = addr_fmt_comp[3].replace(new RegExp("\\S+", "g"), '.*');
+              addr_comp = address.match(new RegExp(s+"(.*)"+e));
+              if(addr_comp !== null && addr_comp[1] !== "") {
+                this.AddressComponents.Locality = addr_comp[1];
+                address = address.replace(addr_comp[1], "");
+              }
+            }
+          }
+        }
+      }
+
+      /* Treating the remaining parts as route/address line */
+      while(address.match(new RegExp('[a-z0-9]$', 'i')) === null) {
+        address = address.substring(0, address.length-1);
+      }
+      this.AddressComponents.Route = address;
     }
     return this;
   };
